@@ -1,5 +1,6 @@
 use derive_more::Display;
 use std::fmt::{self, Debug, Display, Formatter};
+use std::io;
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
@@ -80,6 +81,9 @@ pub enum Error {
 
     #[doc(hidden)]
     __Nonexhaustive,
+
+    #[display(fmt = "Failed to read chunk or filed")]
+    CustomIOError,
 }
 
 impl Debug for Error {
@@ -97,3 +101,9 @@ impl PartialEq for Error {
 }
 
 impl Eq for Error {}
+
+impl From<io::Error> for Error {
+    fn from(_: io::Error) -> Self {
+        Error::CustomIOError
+    }
+}

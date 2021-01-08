@@ -10,6 +10,7 @@ use serde::de::DeserializeOwned;
 #[cfg(feature = "json")]
 use serde_json;
 use std::borrow::Cow;
+use std::io;
 use std::ops::DerefMut;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
@@ -170,7 +171,7 @@ impl Field {
     /// # }
     /// # tokio::runtime::Runtime::new().unwrap().block_on(run());
     /// ```
-    pub async fn chunk(&mut self) -> crate::Result<Option<Bytes>> {
+    pub async fn chunk(&mut self) -> Result<Option<Bytes>, io::Error> {
         self.try_next().await
     }
 
@@ -322,7 +323,7 @@ impl Field {
 }
 
 impl Stream for Field {
-    type Item = Result<Bytes, crate::Error>;
+    type Item = Result<Bytes, io::Error>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
         if self.done {
@@ -332,7 +333,7 @@ impl Stream for Field {
         let mut mutex_guard = match self.state.lock() {
             Ok(lock) => lock,
             Err(err) => {
-                return Poll::Ready(Some(Err(crate::Error::LockFailure(err.to_string().into()))));
+                return Poll::Ready(Some(Err(io::Error::new(io::ErrorKind::Other, err.to_string()))));
             }
         };
 
@@ -341,7 +342,7 @@ impl Stream for Field {
         let stream_buffer = &mut state.buffer;
 
         if let Err(err) = stream_buffer.poll_stream(cx) {
-            return Poll::Ready(Some(Err(crate::Error::StreamReadFailed(err.into()))));
+            return Poll::Ready(Some(Err(io::Error::new(io::ErrorKind::Other, err.to_string()))));
         }
 
         match stream_buffer.read_field_data(state.boundary.as_str(), state.curr_field_name.as_deref()) {
@@ -349,10 +350,7 @@ impl Stream for Field {
                 state.curr_field_size_counter += bytes.len() as u64;
 
                 if state.curr_field_size_counter > state.curr_field_size_limit {
-                    return Poll::Ready(Some(Err(crate::Error::FieldSizeExceeded {
-                        limit: state.curr_field_size_limit,
-                        field_name: state.curr_field_name.clone(),
-                    })));
+                    return Poll::Ready(Some(Err(io::Error::new(io::ErrorKind::Other, "FieldSizeExceeded"))));
                 }
 
                 drop(mutex_guard);
@@ -365,7 +363,7 @@ impl Stream for Field {
                 }
             }
             Ok(None) => Poll::Pending,
-            Err(err) => Poll::Ready(Some(Err(err))),
+            Err(err) => Poll::Ready(Some(Err(io::Error::new(io::ErrorKind::Other, err.to_string())))),
         }
     }
 }
